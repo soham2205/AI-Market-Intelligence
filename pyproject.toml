@@ -1,0 +1,59 @@
+[project]
+name = "ai-market-intelligence"
+version = "0.1.0"
+description = "AI Market Intelligence & Short-Term Forecasting Platform"
+requires-python = ">=3.11"
+dependencies = [
+    "yfinance>=0.2.40",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "pyarrow>=17.0",
+    "scikit-learn>=1.5",
+    "lightgbm>=4.5",
+    "joblib>=1.4",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+nlp = [
+    # <5 is deliberate: transformers v5 reworks the pipeline API this scorer
+    # uses, and pulls a larger CLI dependency tree. 4.57 runs on Python 3.13
+    # with the already-installed CPU torch.
+    "transformers>=4.44,<5",
+    "torch>=2.4",
+]
+server = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "streamlit>=1.38",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

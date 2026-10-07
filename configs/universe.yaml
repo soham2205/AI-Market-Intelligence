@@ -1,0 +1,22 @@
+universe:
+  tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - NVDA
+    - JPM
+    - JNJ
+    - XOM
+    - SPY
+  start: "2015-01-01"
+  end: null
+
+paths:
+  raw_dir: "data/raw/prices"
+  curated_dir: "data/curated"
+
+validation:
+  drop_rows_with_nulls_ohlcv: true
+  min_price: 0.01
+  allow_zero_volume: false

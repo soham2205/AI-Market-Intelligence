@@ -93,7 +93,7 @@ def build_features(
             # A forward return that steps across a seam is not a real return.
             spans = forward_window_invalid(g.index, k, seams)
             if spans.any():
-                fwd = fwd.mask(spans)
+                fwd = fwd.mask(spans.to_numpy())
             feats[fwd_ret_col(k)] = fwd
             feats[label_col(k)] = (
                 (fwd > positive_threshold).astype(float).where(fwd.notna())

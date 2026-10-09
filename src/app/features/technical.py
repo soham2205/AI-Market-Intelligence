@@ -169,5 +169,5 @@ def mask_seam_contaminated(
             continue
         bad = backward_window_invalid(out.index, lookback, seam_dates)
         if bad.any():
-            out.loc[bad, col] = np.nan
+            out.iloc[bad.to_numpy(dtype=bool), out.columns.get_loc(col)] = np.nan
     return out

@@ -483,6 +483,288 @@ def _cmd_backtest(cfg: PipelineConfig, run_id: str | None) -> int:
     return 0
 
 
+def _cmd_benchmark_returns(
+    cfg: PipelineConfig,
+    panel_dir: str | None,
+    benchmark_dir: str | None,
+    out_dir: str | None,
+    version: str,
+    horizons: str | None,
+) -> int:
+    from app.events.benchmark_returns import (
+        DEFAULT_BENCHMARK_DIR,
+        DEFAULT_OUT_DIR,
+        DEFAULT_PANEL_DIR,
+        HORIZONS,
+        build_abnormal_returns,
+    )
+
+    selected = tuple(int(h) for h in horizons.split(",")) if horizons else HORIZONS
+    summary = build_abnormal_returns(
+        panel_dir=panel_dir or DEFAULT_PANEL_DIR,
+        benchmark_dir=benchmark_dir or DEFAULT_BENCHMARK_DIR,
+        horizons=selected,
+        out_dir=out_dir or DEFAULT_OUT_DIR,
+        version=version,
+    )
+    print("\n=== Phase 0: benchmark-adjusted forward returns ===")
+    print(f"  panel: {summary['input_tickers']} tickers, {summary['input_rows']} rows, "
+          f"{summary['input_date_range'][0]} .. {summary['input_date_range'][1]}")
+    print(f"  benchmark: {summary['benchmark_ticker']} "
+          f"({summary['benchmark_date_range'][0]} .. {summary['benchmark_date_range'][1]})")
+    print(f"  output: {summary['output_rows']} rows -> {summary['output_path']}")
+    print("  per-horizon validity:")
+    for h, stats in summary["per_horizon"].items():
+        print(f"    {h:>4}d  valid={stats['n_valid']:>9}  pct_valid={stats['pct_valid']}  "
+              f"end_of_data={stats['n_incomplete_window_end_of_data']}  "
+              f"missing_price={stats['n_missing_price_at_endpoint']}  "
+              f"seam_masked={stats['n_seam_masked']}")
+    print(f"  summary -> {summary['summary_path']}")
+    return 0
+
+
+def _cmd_category_horizon(
+    cfg: PipelineConfig,
+    classified_path: str | None,
+    returns_path: str | None,
+    panel_dir: str | None,
+    sector_path: str | None,
+    out_dir: str | None,
+    version: str,
+    horizons: str | None,
+) -> int:
+    from app.events.category_horizon_analysis import (
+        DEFAULT_CLASSIFIED,
+        DEFAULT_OUT_DIR,
+        DEFAULT_PANEL_DIR,
+        DEFAULT_RETURNS,
+        SECTOR_MAP_PATH,
+    )
+    from app.events.category_horizon_analysis import HORIZONS as DEFAULT_HORIZONS
+    from app.events.category_horizon_analysis import run as run_phase1
+
+    selected = tuple(int(h) for h in horizons.split(",")) if horizons else DEFAULT_HORIZONS
+    summary = run_phase1(
+        classified_path=classified_path or DEFAULT_CLASSIFIED,
+        returns_path=returns_path or DEFAULT_RETURNS,
+        panel_dir=panel_dir or DEFAULT_PANEL_DIR,
+        sector_path=sector_path or SECTOR_MAP_PATH,
+        out_dir=out_dir or DEFAULT_OUT_DIR,
+        version=version,
+        horizons=selected,
+    )
+    print("\n=== Phase 1: news category x investment horizon ===")
+    b = summary["build_stats"]
+    print(f"  articles in: {b['articles_in']:,}  ->  final events: {b['events_final']:,}")
+    print(f"  excluded: misattributed-entity={b['dropped_as_misattributed_entity']:,}  "
+          f"no-price-bar={b['events_excluded_no_price_bar_at_event_date']:,}")
+    print(f"  events with unknown sector: {b['events_with_unknown_sector']:,}")
+    print(f"  overall vs-OTHER tests run: {summary['n_overall_tests_run']}  "
+          f"sector vs-OTHER tests run: {summary['n_sector_tests_run']}")
+    for key, path in summary["outputs"].items():
+        print(f"  {key} -> {path}")
+    print(f"  coverage -> {summary['coverage_path']}")
+    print(f"  report -> {summary['report_path']}")
+    return 0
+
+
+def _cmd_stock_sensitivity(
+    cfg: PipelineConfig,
+    events_path: str | None,
+    category_summary_path: str | None,
+    sector_summary_path: str | None,
+    panel_dir: str | None,
+    out_dir: str | None,
+    version: str,
+    horizons: str | None,
+) -> int:
+    from app.events.stock_sensitivity import (
+        DEFAULT_CATEGORY_SUMMARY,
+        DEFAULT_EVENTS,
+        DEFAULT_OUT_DIR,
+        DEFAULT_PANEL_DIR,
+        DEFAULT_SECTOR_SUMMARY,
+    )
+    from app.events.stock_sensitivity import HORIZONS as DEFAULT_HORIZONS
+    from app.events.stock_sensitivity import run as run_phase2
+
+    selected = tuple(int(h) for h in horizons.split(",")) if horizons else DEFAULT_HORIZONS
+    summary = run_phase2(
+        events_path=events_path or DEFAULT_EVENTS,
+        category_summary_path=category_summary_path or DEFAULT_CATEGORY_SUMMARY,
+        sector_summary_path=sector_summary_path or DEFAULT_SECTOR_SUMMARY,
+        panel_dir=panel_dir or DEFAULT_PANEL_DIR,
+        out_dir=out_dir or DEFAULT_OUT_DIR,
+        version=version,
+        horizons=selected,
+    )
+    print("\n=== Phase 2: stock-specific news-category sensitivity ===")
+    print(f"  tickers: {summary['n_tickers']}  events: {summary['n_events_total']:,}")
+    print(f"  {summary['shrinkage_method']}")
+    print(f"  {summary['multiple_testing']}")
+    print(f"  adequately-supported + FDR-significant cells: "
+          f"{summary['n_fdr_significant_adequately_supported']}")
+    for key, path in summary["outputs"].items():
+        print(f"  {key} -> {path}")
+    print(f"  coverage -> {summary['coverage_path']}")
+    print(f"  report -> {summary['report_path']}")
+    return 0
+
+
+def _cmd_rolling_impact(
+    cfg: PipelineConfig,
+    events_path: str | None,
+    panel_dir: str | None,
+    out_dir: str | None,
+    version: str,
+    horizons: str | None,
+    category_stride_days: int,
+    stock_stride_days: int,
+    window_days: int,
+    as_of: str | None,
+    no_figures: bool,
+) -> int:
+    from app.events.rolling_impact import (
+        DEFAULT_EVENTS,
+        DEFAULT_OUT_DIR,
+        DEFAULT_PANEL_DIR,
+    )
+    from app.events.rolling_impact import HORIZONS as DEFAULT_HORIZONS
+    from app.events.rolling_impact import run as run_phase3
+
+    selected = tuple(int(h) for h in horizons.split(",")) if horizons else DEFAULT_HORIZONS
+    summary = run_phase3(
+        events_path=events_path or DEFAULT_EVENTS,
+        panel_dir=panel_dir or DEFAULT_PANEL_DIR,
+        out_dir=out_dir or DEFAULT_OUT_DIR,
+        version=version,
+        horizons=selected,
+        category_stride_days=category_stride_days,
+        stock_stride_days=stock_stride_days,
+        window_days=window_days,
+        as_of=as_of,
+        figures=not no_figures,
+    )
+    fresh = summary["freshness"]
+    print("\n=== Phase 3: rolling 365-day news-impact intelligence ===")
+    print(f"  NOT real-time: archive ends {fresh['last_news_date']}, "
+          f"{fresh['news_staleness_days_vs_as_of']:,} days "
+          f"({fresh['news_staleness_years_vs_as_of']} yrs) before {fresh['as_of']}")
+    print("  last valid event date per horizon: " + ", ".join(
+        f"{k}={v['last_valid_event_date']}" for k, v in fresh["per_horizon"].items()
+    ))
+    wd = summary["window_design"]
+    print(f"  {wd['n_category_windows']} windows of {wd['window_days']}d, "
+          f"category stride {wd['category_stride_days']}d, stock stride "
+          f"{wd['stock_stride_days']}d")
+    print(f"  rolling category rows: {summary['rolling_category_rows']:,}  "
+          f"stock rows: {summary['rolling_stock_scope']['n_window_cells_emitted']:,}")
+    print(f"  temporal changes established (BH + disjoint intervals): "
+          f"{summary['n_change_established']}")
+    for key, path in summary["outputs"].items():
+        print(f"  {key} -> {path}")
+    print(f"  freshness -> {summary['freshness_path']}")
+    print(f"  report -> {summary['report_path']}")
+    for p in summary["figures"]:
+        print(f"  figure -> {p}")
+    return 0
+
+
+def _cmd_current_news(
+    cfg: PipelineConfig,
+    tickers: str | None,
+    source_name: str,
+    panel_dir: str | None,
+    out_dir: str | None,
+    version: str,
+    horizons: str | None,
+    scorer_name: str,
+    start: str | None,
+    end: str | None,
+    sleep_seconds: float,
+    limit: int,
+    provider_limit: int | None,
+    skip_agreement: bool,
+) -> int:
+    from app.events.current_news_signal import (
+        DEFAULT_OUT_DIR,
+        DEFAULT_PANEL_DIR,
+    )
+    from app.events.current_news_signal import HORIZONS as DEFAULT_HORIZONS
+    from app.events.current_news_signal import run as run_current_news
+
+    selected_tickers = (
+        [t.strip().upper() for t in tickers.split(",") if t.strip()]
+        if tickers
+        else list(cfg.universe.tickers)
+    )
+    selected_horizons = (
+        tuple(int(h) for h in horizons.split(",")) if horizons else DEFAULT_HORIZONS
+    )
+
+    source = None
+    if source_name == "alphavantage":
+        from app.data.sources.alphavantage_source import AlphaVantageNewsSource
+
+        source = AlphaVantageNewsSource(
+            sleep_seconds=sleep_seconds, limit=provider_limit or limit
+        )
+
+    try:
+        summary = run_current_news(
+            tickers=selected_tickers,
+            panel_dir=panel_dir or DEFAULT_PANEL_DIR,
+            out_dir=out_dir or DEFAULT_OUT_DIR,
+            version=version,
+            horizons=selected_horizons,
+            scorer_name=scorer_name,
+            source=source,
+            source_name=source_name,
+            provider_limit=provider_limit,
+            start=start,
+            end=end,
+            check_agreement=not skip_agreement,
+        )
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+
+    print("\n=== Current news vs Phase 2 historical sensitivity ===")
+    print(f"  articles: {summary['n_articles_retrieved']}  "
+          f"events: {summary['n_events']}  evidence rows: {summary['n_evidence_rows']}")
+    if summary["category_counts"]:
+        print("  categories: " + ", ".join(
+            f"{k}={v}" for k, v in sorted(summary["category_counts"].items())
+        ))
+    agreement = summary.get("classifier_agreement_vs_historical")
+    if agreement and agreement.get("overall_agreement") is not None:
+        print(f"  classifier agreement vs historical labels: "
+              f"{agreement['overall_agreement'] * 100:.1f}% of {agreement['n']:,} articles")
+    counts = summary.get("evidence_status_counts") or {}
+    if counts:
+        total = sum(counts.values())
+        weak = sum(counts.get(k, 0) for k in
+                   ("exploratory_history", "insufficient_history", "no_history"))
+        print(f"  evidence: {counts.get('supported_and_significant', 0)} "
+              f"adequately-supported+significant, {weak}/{total} too thin to rely on")
+    limits = summary.get("provider_limits") or {}
+    if limits.get("total_withheld_by_plan"):
+        print(f"  provider: matched {limits['total_matching_at_provider']}, returned "
+              f"{limits['total_returned_by_provider']}, withheld "
+              f"{limits['total_withheld_by_plan']} under the plan cap")
+    if not summary.get("artifacts_written", True):
+        print("  no articles retrieved -> no article/event/evidence artifacts written")
+    print(f"  forward returns computable: {summary['forward_returns_computable']} "
+          f"(price panel ends {summary['last_known_session']}; Phase 1-3 evidence is "
+          f"historical, NOT current)")
+    for key, path in summary["outputs"].items():
+        if path:
+            print(f"  {key} -> {path}")
+    print(f"  run record -> {summary['run_path']}")
+    print(f"  report -> {summary['report_path']}")
+    return 0
+
+
 def _cmd_fnspid_extract(cfg: PipelineConfig, skip_download: bool) -> int:
     from app.data.sources.fnspid_source import (
         download_fnspid,
@@ -531,9 +813,149 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--start", default=None)
     p.add_argument("--end", default=None)
 
+    p = sub.add_parser(
+        "current-news",
+        help="Fetch current news (Alpha Vantage) -> FinBERT -> 7 categories -> Phase 2 evidence",
+    )
+    add_config(p)
+    p.add_argument(
+        "--tickers", default=None,
+        help="Comma-separated tickers (default: the config universe)",
+    )
+    p.add_argument(
+        "--source", default="marketaux",
+        choices=["marketaux", "alphavantage", "yfinance"],
+        help=(
+            "News provider. 'marketaux' needs MARKETAUX_API_TOKEN (free tier: 3 "
+            "articles/request, 100 requests/day); 'alphavantage' needs "
+            "ALPHAVANTAGE_API_KEY (NEWS_SENTIMENT is premium-only); 'yfinance' needs "
+            "no credential but returns only ~2 days"
+        ),
+    )
+    p.add_argument(
+        "--provider-limit", type=int, default=None,
+        help=(
+            "Articles to request per ticker. The provider's plan may cap this lower "
+            "and the run reports the gap (Marketaux free caps at 3)"
+        ),
+    )
+    p.add_argument(
+        "--scorer", default="finbert", choices=["auto", "lexicon", "finbert"],
+        help="'finbert' fails loudly if FinBERT is unavailable",
+    )
+    p.add_argument("--start", default=None, help="Earliest publication time (ISO)")
+    p.add_argument("--end", default=None, help="Latest publication time (ISO)")
+    p.add_argument("--panel-dir", default=None, help="Override the curated price panel dir")
+    p.add_argument("--out-dir", default=None, help="Override the output directory")
+    p.add_argument("--version", default="v1", help="Output artifact version suffix")
+    p.add_argument(
+        "--horizons", default=None,
+        help="Comma-separated trading-session horizons (default: 1,5,20,60,126,252)",
+    )
+    p.add_argument(
+        "--sleep-seconds", type=float, default=12.0,
+        help="Pause between ticker requests (free tier is ~5 req/min)",
+    )
+    p.add_argument(
+        "--limit", type=int, default=200, help="Max articles per ticker (API cap 1000)"
+    )
+    p.add_argument(
+        "--skip-agreement", action="store_true",
+        help="Skip scoring the classifier against the 1.36M historical labels (faster)",
+    )
+    # NOTE: the API key is deliberately NOT a CLI argument -- it would land in
+    # shell history and process listings. It is read from ALPHAVANTAGE_API_KEY.
+
     p = sub.add_parser("fnspid-extract", help="Download + chunk-filter FNSPID to our universe")
     add_config(p)
     p.add_argument("--skip-download", action="store_true")
+
+    p = sub.add_parser(
+        "benchmark-returns",
+        help="Phase 0: benchmark-adjusted forward returns (event-impact analysis foundation)",
+    )
+    add_config(p)
+    p.add_argument("--panel-dir", default=None, help="Override the curated price panel dir")
+    p.add_argument("--benchmark-dir", default=None, help="Override the SPY benchmark cache dir")
+    p.add_argument("--out-dir", default=None, help="Override the output directory")
+    p.add_argument("--version", default="v1", help="Output artifact version suffix")
+    p.add_argument(
+        "--horizons",
+        default=None,
+        help="Comma-separated trading-session horizons (default: 1,5,20,60,126,252)",
+    )
+
+    p = sub.add_parser(
+        "category-horizon-returns",
+        help="Phase 1: news category x investment horizon (x sector) returns",
+    )
+    add_config(p)
+    p.add_argument("--classified-path", default=None, help="Override classified-articles path")
+    p.add_argument("--returns-path", default=None, help="Override Phase 0 returns path")
+    p.add_argument("--panel-dir", default=None, help="Override the curated price panel dir")
+    p.add_argument("--sector-path", default=None, help="Override the GICS sector map path")
+    p.add_argument("--out-dir", default=None, help="Override the output directory")
+    p.add_argument("--version", default="v1", help="Output artifact version suffix")
+    p.add_argument(
+        "--horizons",
+        default=None,
+        help="Comma-separated trading-session horizons (default: 1,5,20,60,126,252)",
+    )
+
+    p = sub.add_parser(
+        "stock-sensitivity",
+        help="Phase 2: stock-specific news-category sensitivity",
+    )
+    add_config(p)
+    p.add_argument("--events-path", default=None, help="Override Phase 1 events path")
+    p.add_argument(
+        "--category-summary-path", default=None, help="Override Phase 1 category summary path"
+    )
+    p.add_argument(
+        "--sector-summary-path", default=None, help="Override Phase 1 sector summary path"
+    )
+    p.add_argument("--panel-dir", default=None, help="Override the curated price panel dir")
+    p.add_argument("--out-dir", default=None, help="Override the output directory")
+    p.add_argument("--version", default="v1", help="Output artifact version suffix")
+    p.add_argument(
+        "--horizons",
+        default=None,
+        help="Comma-separated trading-session horizons (default: 1,5,20,60,126,252)",
+    )
+
+    p = sub.add_parser(
+        "rolling-impact",
+        help="Phase 3: rolling 365-day news-impact intelligence (temporal stability)",
+    )
+    add_config(p)
+    p.add_argument("--events-path", default=None, help="Override Phase 1 events path")
+    p.add_argument("--panel-dir", default=None, help="Override the curated price panel dir")
+    p.add_argument("--out-dir", default=None, help="Override the output directory")
+    p.add_argument("--version", default="v1", help="Output artifact version suffix")
+    p.add_argument(
+        "--horizons",
+        default=None,
+        help="Comma-separated trading-session horizons (default: 1,5,20,60,126,252)",
+    )
+    p.add_argument(
+        "--window-days", type=int, default=365, help="Rolling window length in calendar days"
+    )
+    p.add_argument(
+        "--category-stride-days", type=int, default=91,
+        help="Days between category-level windows (default: 91, ~quarterly)",
+    )
+    p.add_argument(
+        "--stock-stride-days", type=int, default=182,
+        help="Days between stock-level windows (default: 182, ~semi-annual)",
+    )
+    p.add_argument(
+        "--as-of", default=None,
+        help="Date to measure staleness against (default: today). For reproducible reports.",
+    )
+    p.add_argument(
+        "--no-figures", action="store_true",
+        help="Skip optional matplotlib figures (they are skipped anyway if it is absent)",
+    )
 
     p = sub.add_parser("featurize", help="Build point-in-time feature matrix with labels")
     add_config(p)
@@ -588,8 +1010,70 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_ingest_prices(cfg, args.source)
     if args.command == "ingest-news":
         return _cmd_ingest_news(cfg, args.source, args.scorer, args.start, args.end)
+    if args.command == "current-news":
+        return _cmd_current_news(
+            cfg,
+            tickers=args.tickers,
+            source_name=args.source,
+            panel_dir=args.panel_dir,
+            out_dir=args.out_dir,
+            version=args.version,
+            horizons=args.horizons,
+            scorer_name=args.scorer,
+            start=args.start,
+            end=args.end,
+            sleep_seconds=args.sleep_seconds,
+            limit=args.limit,
+            provider_limit=args.provider_limit,
+            skip_agreement=args.skip_agreement,
+        )
     if args.command == "fnspid-extract":
         return _cmd_fnspid_extract(cfg, args.skip_download)
+    if args.command == "benchmark-returns":
+        return _cmd_benchmark_returns(
+            cfg,
+            panel_dir=args.panel_dir,
+            benchmark_dir=args.benchmark_dir,
+            out_dir=args.out_dir,
+            version=args.version,
+            horizons=args.horizons,
+        )
+    if args.command == "category-horizon-returns":
+        return _cmd_category_horizon(
+            cfg,
+            classified_path=args.classified_path,
+            returns_path=args.returns_path,
+            panel_dir=args.panel_dir,
+            sector_path=args.sector_path,
+            out_dir=args.out_dir,
+            version=args.version,
+            horizons=args.horizons,
+        )
+    if args.command == "stock-sensitivity":
+        return _cmd_stock_sensitivity(
+            cfg,
+            events_path=args.events_path,
+            category_summary_path=args.category_summary_path,
+            sector_summary_path=args.sector_summary_path,
+            panel_dir=args.panel_dir,
+            out_dir=args.out_dir,
+            version=args.version,
+            horizons=args.horizons,
+        )
+    if args.command == "rolling-impact":
+        return _cmd_rolling_impact(
+            cfg,
+            events_path=args.events_path,
+            panel_dir=args.panel_dir,
+            out_dir=args.out_dir,
+            version=args.version,
+            horizons=args.horizons,
+            category_stride_days=args.category_stride_days,
+            stock_stride_days=args.stock_stride_days,
+            window_days=args.window_days,
+            as_of=args.as_of,
+            no_figures=args.no_figures,
+        )
     if args.command == "featurize":
         return _cmd_featurize(cfg)
     if args.command == "train":
